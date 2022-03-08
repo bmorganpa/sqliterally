@@ -1,69 +1,56 @@
-import {mergeAdjecent} from './utils';
 import {STRINGIFY, ADDTOCLAUSE} from './constants';
 
+export function fromTemplateLiteral(pieces = [''], values = [], delimiter = '') {
+		return new Literal(
+			pieces
+				.flatMap((element, index) => {
+					const value = values[index];
+					if (value instanceof Literal) {
+						return [element, value]
+					} else if (index < values.length) {
+						return [element, new SqlParameter(value)]
+					} else {
+						return element
+					}
+				})
+		);
+}
+
+class SqlParameter {
+	constructor(value) {
+		this.value = value
+	}
+}
+
 export default class Literal {
-	constructor(pieces = [''], values = [], delimiter = '') {
-		this.pieces = [...pieces];
-		this.values = [...values];
-		this.delimiter = delimiter;
-
-		for (let i = 0, j = 1, k = 0; i < values.length; i++, j++, k++) {
-			let val = values[i];
-			if (val && val[ADDTOCLAUSE]) val = val.build(' ');
-			if (val instanceof Literal) {
-				this.values.splice(k, 1);
-
-				if (val.pieces.length === 0) {
-					mergeAdjecent(this.pieces, j, 1);
-					continue;
-				}
-
-				this.pieces.splice(j, 0, ...val.pieces);
-				mergeAdjecent(this.pieces, j, 1, 0);
-				mergeAdjecent(this.pieces, j + val.pieces.length - 2, 0, 1);
-
-				this.values.splice(k, 0, ...val.values);
-				j += val.pieces.length;
-				k += val.values.length;
-				i += val.values.length;
-			}
-		}
+	constructor(tokens) {
+		this.tokens = tokens
 	}
 
 	append(literal, delimiter = '') {
-		const clone = this.clone();
-
-		if (typeof literal === 'string') {
-			clone.pieces[clone.pieces.length - 1] += `${delimiter}${literal}`;
-			return clone;
-		}
-
-		clone.pieces[clone.pieces.length - 1] += `${delimiter || literal.delimiter}${literal.pieces[0]}`;
-		const [_, ...pieces] = literal.pieces;
-		clone.pieces.push(...pieces);
-		clone.values.push(...literal.values);
-
-		return clone;
+		return new Literal([...this.tokens, literal])
 	}
 
 	prefix(string = '') {
-		const clone = this.clone();
-		clone.pieces[0] = `${string}${this.pieces[0]}`;
-		return clone;
+		return new Literal([string, ...this.tokens])
 	}
 
 	suffix(string = '') {
-		const clone = this.clone();
-		clone.pieces[clone.pieces.length] += string;
-		return clone;
-	}
-
-	clone() {
-		return new Literal(this.pieces, this.values, this.delimiter);
+		return append(string)
 	}
 
 	[STRINGIFY](type = 'pg') {
-		return this.pieces.reduce((acc, part, i) => acc + (type == 'pg' ? '$' + i : '?') + part);
+		return this.tokens.reduce((acc, token, i) => {
+			if (typeof token === "string") {
+				return acc + token
+			} else if (token instanceof SqlParameter) {
+				return acc + (type == 'pg' ? '$' + Math.ceil(i / 2) : '?')
+			} else if (token instanceof Literal) {
+				return acc + token[STRINGIFY](type)
+			} else {
+				throw Error(`Unable to handle token: ${token}`)
+			}
+		});
 	}
 
 	get text() {
@@ -72,5 +59,20 @@ export default class Literal {
 
 	get sql() {
 		return this[STRINGIFY]('mysql');
+	}
+
+	get values() {
+		return this.tokens
+			.flatMap((token) => {
+				if (typeof token === "string") {
+					return []
+				} else if (token instanceof SqlParameter) {
+					return token.value;
+				} else if (token instanceof Literal) {
+					return token.values;
+				} else {
+					throw Error(`Unable to handle token: ${token}`)
+				}
+			})
 	}
 }
