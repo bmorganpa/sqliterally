@@ -5,7 +5,7 @@ export function fromTemplateLiteral(pieces = [''], values = [], delimiter = '') 
 			pieces
 				.flatMap((element, index) => {
 					const value = values[index];
-					if (value instanceof Literal) {
+					if (value instanceof Literal || value instanceof SqlString) {
 						return [element, value]
 					} else if (index < values.length) {
 						return [element, new SqlParameter(value)]
@@ -17,6 +17,12 @@ export function fromTemplateLiteral(pieces = [''], values = [], delimiter = '') 
 }
 
 class SqlParameter {
+	constructor(value) {
+		this.value = value
+	}
+}
+
+export class SqlString {
 	constructor(value) {
 		this.value = value
 	}
@@ -43,6 +49,8 @@ export default class Literal {
 		return this.tokens.reduce((acc, token, i) => {
 			if (typeof token === "string") {
 				return acc + token
+			} else if (token instanceof SqlString) {
+				return acc + token.value
 			} else if (token instanceof SqlParameter) {
 				return acc + (type == 'pg' ? '$' + Math.ceil(i / 2) : '?')
 			} else if (token instanceof Literal) {
@@ -64,7 +72,7 @@ export default class Literal {
 	get values() {
 		return this.tokens
 			.flatMap((token) => {
-				if (typeof token === "string") {
+				if (typeof token === "string" || token instanceof SqlString) {
 					return []
 				} else if (token instanceof SqlParameter) {
 					return token.value;
